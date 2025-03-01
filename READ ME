@@ -1,0 +1,8 @@
+This is the repository for Assignment 4
+
+Here we analyzed the Defense Contractor data to create:
+1) Time Series
+2) Decomposition
+3) ACF
+
+We found that the best model based on RSME was Naive
