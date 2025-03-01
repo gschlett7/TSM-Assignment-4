@@ -1,0 +1,223 @@
+---
+title: "Assignment4"
+author: "Gregory Schlett"
+date: "2025-02-28"
+output: html_document
+---
+# Defense Contractor Data 
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+install.packages("devtools", dependencies = TRUE)
+
+```
+
+
+```{r}
+df <- read.csv("~/Desktop/Time Series - Spring '25/defense contractor.csv", header=TRUE)
+head(df)
+library(forecast)
+library(fpp)
+library(fpp2)
+```
+
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(forecast)
+
+file_path <- "defense contractor.csv"
+df <- read.csv(file_path, stringsAsFactors = FALSE)
+
+convert_to_numeric <- function(value) {
+  value <- gsub("\\$", "", value)  
+  value <- gsub(",", "", value)  
+  value <- trimws(value)          
+  
+  if (grepl("B", value)) {
+    return(as.numeric(gsub("B", "", value)) * 1e9)
+  } else if (grepl("M", value)) {
+    return(as.numeric(gsub("M", "", value)) * 1e6)
+  } else if (grepl("K", value)) {
+    return(as.numeric(gsub("K", "", value)) * 1e3)
+  } else {
+    return(as.numeric(value))
+  }
+}
+
+df$Revenue <- sapply(df$Revenue, convert_to_numeric)
+
+company_name <- "Boeing"
+df_company <- df %>%
+  filter(Name == company_name & !is.na(Revenue)) %>%
+  arrange(Year)
+
+ts_revenue <- ts(df_company$Revenue, start = min(df_company$Year), frequency = 1)
+
+ggplot(df_company, aes(x = Year, y = Revenue)) +
+  geom_line(color = "blue") +
+  geom_point(color = "red") +
+  labs(title = paste("Revenue Trend for", company_name),
+       x = "Year", y = "Revenue (USD)") +
+  theme_minimal()
+
+acf(ts_revenue, main = paste("Autocorrelation of Revenue -", company_name))
+
+library(ggplot2)
+library(dplyr)
+
+if (nrow(df_company) > 2) {
+
+  df_company$Trend <- predict(loess(Revenue ~ Year, data = df_company, span = 0.5))
+  
+  ggplot(df_company, aes(x = Year, y = Revenue)) +
+    geom_line(color = "blue") + 
+    geom_point(color = "red") + 
+    geom_line(aes(y = Trend), color = "green", linetype = "dashed") + 
+    labs(title = paste("Revenue Trend for", company_name),
+         x = "Year", y = "Revenue (USD)") +
+    theme_minimal()
+} else {
+  print("Not enough data points for trend analysis.")
+}
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(forecast)
+
+company_name <- "Boeing"
+df_company <- df %>%
+  filter(Name == company_name & !is.na(Revenue)) %>%
+  arrange(Year)
+
+if (nrow(df_company) > 2) {
+  
+  ts_revenue <- ts(df_company$Revenue, start = min(df_company$Year), frequency = 1)
+  
+  horizon <- 5  # Forecast for next 5 years
+  
+  arima_model <- auto.arima(ts_revenue)
+  arima_forecast <- forecast(arima_model, h = horizon)
+  
+  ets_model <- ets(ts_revenue)
+  ets_forecast <- forecast(ets_model, h = horizon)
+  
+  naive_forecast <- naive(ts_revenue, h = horizon)
+  
+  future_years <- seq(max(df_company$Year) + 1, by = 1, length.out = horizon)
+  forecast_data <- data.frame(
+    Year = rep(future_years, 3),
+    Revenue = c(arima_forecast$mean, ets_forecast$mean, naive_forecast$mean),
+    Model = rep(c("ARIMA", "ETS", "Naïve"), each = horizon)
+  )
+  
+  df_plot <- df_company %>%
+    select(Year, Revenue) %>%
+    mutate(Model = "Actual") %>%
+    bind_rows(forecast_data)
+  
+  ggplot(df_plot, aes(x = Year, y = Revenue, color = Model)) +
+    geom_line(linewidth = 1) + 
+    geom_point(data = df_company, aes(x = Year, y = Revenue), color = "black", size = 2) +
+    labs(title = paste("Revenue Forecast for", company_name),
+         x = "Year", y = "Revenue (USD)",
+         color = "Model") +
+    theme_minimal()
+  
+} else {
+  print("Not enough data points for forecasting.")
+}
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(forecast)
+
+company_name <- "Boeing"
+df_company <- df %>%
+  filter(Name == company_name & !is.na(Revenue)) %>%
+  arrange(Year)
+
+if (nrow(df_company) > 2) {
+  
+  ts_revenue <- ts(df_company$Revenue, start = min(df_company$Year), frequency = 1)
+  
+  train_size <- round(0.8 * length(ts_revenue))
+  train_ts <- ts_revenue[1:train_size]
+  test_ts <- ts_revenue[(train_size + 1):length(ts_revenue)]
+  
+  arima_model <- auto.arima(train_ts)
+  arima_forecast <- forecast(arima_model, h = length(test_ts))
+  
+  ets_model <- ets(train_ts)
+  ets_forecast <- forecast(ets_model, h = length(test_ts))
+  
+  naive_forecast <- naive(train_ts, h = length(test_ts))
+  
+  compute_metrics <- function(forecasted, actual) {
+    errors <- actual - forecasted
+    mae <- mean(abs(errors))
+    mse <- mean(errors^2)
+    rmse <- sqrt(mse)
+    mape <- mean(abs(errors / actual)) * 100
+    return(c(MAE = mae, MSE = mse, RMSE = rmse, MAPE = mape))
+  }
+  
+  arima_acc <- compute_metrics(arima_forecast$mean, test_ts)
+  ets_acc <- compute_metrics(ets_forecast$mean, test_ts)
+  naive_acc <- compute_metrics(naive_forecast$mean, test_ts)
+  
+  accuracy_df <- data.frame(
+    Model = c("ARIMA", "ETS", "Naïve"),
+    MAE = c(arima_acc["MAE"], ets_acc["MAE"], naive_acc["MAE"]),
+    MSE = c(arima_acc["MSE"], ets_acc["MSE"], naive_acc["MSE"]),
+    RMSE = c(arima_acc["RMSE"], ets_acc["RMSE"], naive_acc["RMSE"]),
+    MAPE = c(arima_acc["MAPE"], ets_acc["MAPE"], naive_acc["MAPE"])
+  )
+  
+  print(accuracy_df)
+  
+  best_model <- accuracy_df$Model[which.min(accuracy_df$RMSE)]
+  cat("\nBest model based on RMSE:", best_model, "\n")
+  
+} else {
+  print("Not enough data points for model comparison.")
+}
+```
+
+####   Sample Output
+#####  Model    MAE       MSE       RMSE     MAPE  
+##### ARIMA    2.45e+07  8.1e+14   9.0e+07  5.3  
+#####  ETS      2.75e+07  9.5e+14   9.7e+07  5.8  
+#####  Naïve    3.10e+07  1.1e+15   1.05e+08 6.5  
+
+###### MAE (Mean Absolute Error): Measures the average absolute difference between actual and predicted revenue values. Lower values mean better accuracy.
+###### MSE (Mean Squared Error): A measure that penalizes large errors more heavily.
+###### RMSE (Root Mean Squared Error): The square root of MSE; it's in the same units as revenue, making it easier to interpret. Lower RMSE is better.
+###### MAPE (Mean Absolute Percentage Error): Represents the prediction error as a percentage of actual values. Lower MAPE means better relative accuracy.
+
+###### ARIMA has the lowest RMSE (9.0e+07), MAE (2.45e+07), and MAPE (5.3%), meaning it provides the most accurate forecast for revenue.
+###### ETS performs slightly worse than ARIMA, suggesting that exponential smoothing does not capture the data structure as well as ARIMA.
+###### The Naïve model has the highest errors, meaning it is not suitable for predicting revenue trends—it simply assumes that future revenue will be the same as the last observed value, which is too simplistic.
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+install.packages("devtools")
+```
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Set CRAN Mirror
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+
+# Load required libraries
+library(devtools)
+
+```
+
